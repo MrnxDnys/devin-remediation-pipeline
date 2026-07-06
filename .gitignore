@@ -17,6 +17,9 @@ venv/
 data/
 scan-artifacts/
 
+# Internal planning - not part of the deliverable
+_work/
+
 # OS / editor
 .DS_Store
 .idea/
