@@ -1,0 +1,23 @@
+services:
+  # Web service: GitHub webhook receiver + simulate endpoint + observability dashboard.
+  pipeline:
+    build: .
+    env_file: .env.local
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  # Scheduled/outer trigger: periodically audits the fork and files labelled issues.
+  # Enable with:  docker compose --profile scanner up
+  scanner:
+    build: .
+    env_file: .env.local
+    environment:
+      - SCAN_INTERVAL_SECONDS=3600
+    volumes:
+      - ./data:/app/data
+    command: ["python", "-m", "scripts.scheduler"]
+    profiles: ["scanner"]
+    restart: unless-stopped

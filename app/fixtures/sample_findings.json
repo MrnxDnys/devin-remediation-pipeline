@@ -1,0 +1,29 @@
+[
+  {
+    "ecosystem": "pip",
+    "package": "Flask",
+    "installed_version": "2.0.1",
+    "vulnerability_id": "GHSA-m2qf-hxjv-5gpq",
+    "fix_versions": ["2.2.5", "2.3.2"],
+    "description": "Flask before 2.2.5 may leak a permanent session cookie when SESSION_REFRESH_EACH_REQUEST and caching are combined. Illustrative fixture entry.",
+    "source_file": "requirements/base.txt"
+  },
+  {
+    "ecosystem": "pip",
+    "package": "Werkzeug",
+    "installed_version": "2.0.2",
+    "vulnerability_id": "GHSA-2g68-c3qc-8985",
+    "fix_versions": ["2.2.3"],
+    "description": "Werkzeug debugger vulnerable to remote code execution under specific conditions. Illustrative fixture entry.",
+    "source_file": "requirements/base.txt"
+  },
+  {
+    "ecosystem": "pip",
+    "package": "cryptography",
+    "installed_version": "3.4.7",
+    "vulnerability_id": "GHSA-hggm-jvf3-9r38",
+    "fix_versions": ["42.0.0"],
+    "description": "OpenSSL vulnerability bundled with older cryptography wheels. Illustrative fixture entry.",
+    "source_file": "requirements/base.txt"
+  }
+]
