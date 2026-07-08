@@ -41,6 +41,15 @@ def _issue(number, vuln_id="GHSA-xxxx"):
             "body": f"body\n<!--devin-meta {meta} -->"}
 
 
+def _code_issue(number, vuln_id="CVE-code"):
+    """A code-level finding (finding_type=code) - the highest-stakes case the review gate
+    catches in replay/mock."""
+    meta = (f'{{"dedup_key":"code:{vuln_id}","finding_type":"code","severity":"high",'
+            f'"vulnerability_id":"{vuln_id}"}}')
+    return {"number": number, "title": f"Fix authz bug ({vuln_id})",
+            "body": f"body\n<!--devin-meta {meta} -->"}
+
+
 def test_happy_path_opens_pr():
     from app import orchestrator
     job = orchestrator.enqueue(_issue(101))
@@ -138,3 +147,49 @@ def test_concurrency_cap_limits_running_sessions(monkeypatch):
     assert orchestrator.max_concurrent_observed == 2
     # All findings were eventually serviced (queued ones picked up as slots freed).
     assert all(db.get_job(j.id).status == JobStatus.SUCCEEDED for j in jobs)
+
+
+# --- Review gate: an independent second Devin session audits the fixer's PR --------------
+
+def test_review_gate_approves_dependency_fix():
+    from app import orchestrator
+    job = orchestrator.enqueue(_issue(200))
+    orchestrator.join_workers(timeout=10)  # settle past fix + review
+    done = db.get_job(job.id)
+    assert done.status == JobStatus.SUCCEEDED  # verdict is a field, not a terminal state
+    assert done.review_verdict == "approve"
+    assert done.review_session_url  # an independent reviewer session was recorded
+    assert done.review_summary
+
+
+def test_review_gate_requests_changes_on_code_fix():
+    from app import orchestrator
+    job = orchestrator.enqueue(_code_issue(201))
+    orchestrator.join_workers(timeout=10)
+    done = db.get_job(job.id)
+    assert done.status == JobStatus.SUCCEEDED
+    assert done.review_verdict == "request_changes"
+    # The gate CAUGHT a concrete, evidenced blocking issue on the highest-stakes item.
+    assert "embedded-guest" in (done.review_summary or "")
+
+
+def test_review_gate_disabled_skips_review(monkeypatch):
+    from app import orchestrator
+    monkeypatch.setattr(settings, "enable_review_gate", False)
+    job = orchestrator.enqueue(_issue(202))
+    orchestrator.join_workers(timeout=10)
+    done = db.get_job(job.id)
+    assert done.status == JobStatus.SUCCEEDED
+    assert done.review_verdict is None
+    assert done.review_session_url is None
+    kinds = {e["kind"] for e in db.list_events(limit=200)}
+    assert "review_started" not in kinds  # no reviewer session was ever created
+
+
+def test_failed_jobs_are_never_reviewed():
+    from app import orchestrator
+    job = orchestrator.enqueue(_issue(203, vuln_id="force-fail"))
+    orchestrator.join_workers(timeout=10)
+    done = db.get_job(job.id)
+    assert done.status == JobStatus.ESCALATED
+    assert done.review_verdict is None  # no PR -> nothing to review

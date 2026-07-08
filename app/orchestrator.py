@@ -19,10 +19,19 @@ from .devin_client import get_client
 from .models import (
     DEVIN_BLOCKED_STATES,
     DEVIN_TERMINAL_STATES,
+    REVIEW_VERDICT_SCHEMA,
+    REVIEW_VERDICTS,
     STRUCTURED_OUTPUT_SCHEMA,
     Job,
     JobStatus,
 )
+
+# Map a review verdict to the event kind recorded on the timeline.
+_REVIEW_EVENTS = {
+    "approve": "review_approved",
+    "request_changes": "review_changes_requested",
+    "reject": "review_rejected",
+}
 
 
 def _now() -> str:
@@ -156,6 +165,10 @@ def _run(job: Job) -> None:
         while True:
             outcome = _attempt(job)
             if outcome == "success":
+                # The independent review gate runs INSIDE this same slot - a job holds one
+                # slot across fix + review, so we never acquire a second (which could
+                # deadlock when the pool is full). A job may thus use 2 sessions serially.
+                _maybe_review(job)
                 return
             if outcome == "retry" and job.attempts <= settings.max_retries:
                 db.add_event("retry", f"Retrying #{job.issue_number} (attempt {job.attempts + 1})", job.id)
@@ -197,7 +210,7 @@ def _attempt(job: Job) -> str:
     db.update_job(job)
     db.add_event("session_created", f"Devin session {job.devin_session_id}", job.id)
 
-    detail = _poll_until_terminal(client, job)
+    detail = _poll_until_terminal(client, job.devin_session_id, job)
     if detail is None:  # timed out - transient, worth a retry
         job.status = JobStatus.FAILED
         job.error = "session exceeded timeout"
@@ -239,17 +252,115 @@ def _attempt(job: Job) -> str:
     return "retry"
 
 
-def _poll_until_terminal(client, job: Job) -> dict | None:
-    """Poll until the session is terminal or blocked; None on timeout."""
+def _poll_until_terminal(client, session_id: str, job: Job) -> dict | None:
+    """Poll the given session until it is terminal or blocked; None on timeout."""
     deadline = time.time() + settings.session_timeout_seconds
     stop = DEVIN_TERMINAL_STATES | DEVIN_BLOCKED_STATES
     while time.time() < deadline:
-        detail = client.get_session(job.devin_session_id)
+        detail = client.get_session(session_id)
         if (detail.get("status_enum") or "").lower() in stop:
             return detail
         time.sleep(settings.poll_interval_seconds)
     db.add_event("timeout", f"#{job.issue_number} exceeded session timeout", job.id)
     return None
+
+
+def build_review_prompt(job: Job) -> str:
+    """Prompt for the SECOND, independent reviewer session. Makes clear the reviewer did not
+    write the PR and must be adversarial."""
+    finding = (f"the {job.finding_type} finding {job.vulnerability_id or ''}".strip()
+               + (f" in {job.package}" if job.package else ""))
+    return f"""Independently review PR {job.pr_url} that remediates {finding} in the
+repository `{settings.github_repo}` (a fork of apache/superset), tracked by GitHub issue
+#{job.issue_number}: "{job.issue_title}".
+
+You did NOT write this PR. Be adversarial. Independently verify that:
+- it actually fixes the vulnerability (not just silences a scanner);
+- the diff is correct, minimal, and safe;
+- it introduces no regressions or new issues (including leaked secrets);
+- the tests are adequate for the change.
+
+Do NOT push commits or merge. Return the review verdict per the provided schema: a
+`verdict` of approve | request_changes | reject, your `confidence`, concrete
+`blocking_issues` that block merge, what you `checked`, and a one-sentence `summary`."""
+
+
+def _maybe_review(job: Job) -> None:
+    """Run the independent review gate on a freshly-opened PR, if enabled. Only SUCCEEDED
+    jobs that actually opened a PR are reviewed (failed/escalated/no-PR are skipped)."""
+    if not settings.enable_review_gate:
+        return
+    if job.status != JobStatus.SUCCEEDED or not (job.pr_url or "").strip():
+        return
+    _review(job)
+
+
+def _review(job: Job) -> None:
+    """Second, independent Devin session that audits the fixer's PR and records a verdict.
+    Comment-only: never merges. Runs inside the job's existing concurrency slot."""
+    client = get_client()
+    tags = ["review", f"issue-{job.issue_number}", job.finding_type, job.severity]
+    created = client.create_session(
+        prompt=build_review_prompt(job),
+        title=f"Review remediation PR for #{job.issue_number} ({job.severity})",
+        tags=tags,
+        schema=REVIEW_VERDICT_SCHEMA,
+        playbook_id=None,  # review is an independent audit, not the remediation Playbook
+    )
+    job.review_session_url = created.get("url")
+    db.update_job(job)
+    db.add_event("review_started",
+                 f"Independent review session {created['session_id']}", job.id)
+
+    detail = _poll_until_terminal(client, created["session_id"], job)
+    if detail is None:
+        db.add_event("review_timeout", f"#{job.issue_number} review session timed out", job.id)
+        return
+
+    out = detail.get("structured_output") or {}
+    verdict = (out.get("verdict") or "").strip().lower()
+    if verdict not in REVIEW_VERDICTS:
+        db.add_event("review_error",
+                     f"#{job.issue_number} review returned no valid verdict", job.id)
+        return
+
+    blocking = [str(b).strip() for b in (out.get("blocking_issues") or []) if str(b).strip()]
+    summary = (out.get("summary") or "").strip()
+    review_summary = summary
+    if blocking:
+        review_summary = (summary + " Blocking: " + "; ".join(blocking)).strip()
+
+    job.review_verdict = verdict
+    job.review_summary = review_summary or None
+    db.update_job(job)
+    detail_msg = f"#{job.issue_number} review: {verdict}"
+    if blocking:
+        detail_msg += f" ({len(blocking)} blocking issue(s))"
+    db.add_event(_REVIEW_EVENTS[verdict], detail_msg, job.id)
+    _comment_review(job, verdict, blocking)
+
+    # Comment-only default: even when opted in, only RECORD a would-merge decision here.
+    if settings.auto_merge_on_approve and verdict == "approve" and not blocking:
+        db.add_event("would_auto_merge",
+                     f"#{job.issue_number} gate passed - would auto-merge (not merging)", job.id)
+
+
+def _comment_review(job: Job, verdict: str, blocking: list[str]) -> None:
+    lines = [
+        f"**Independent Devin review gate**: `{verdict}`",
+        "",
+        f"> {job.review_summary or ''}",
+    ]
+    if blocking:
+        lines += ["", "Blocking issues:"] + [f"- {b}" for b in blocking]
+    lines += [
+        "",
+        f"Reviewer session: {job.review_session_url}",
+        "_A second, independent Devin session audited this PR. Comment-only - a human still "
+        "approves and merges._",
+    ]
+    body = "\n".join(lines)
+    _safe_github(lambda: github_client.comment_issue(job.issue_number, body))
 
 
 def _comment_success(job: Job) -> None:

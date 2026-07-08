@@ -156,12 +156,14 @@ def test_serialize_job_shape():
     job.devin_session_url = "https://app.devin.ai/sessions/x"
     job.summary = "did the thing"
     job.fix_strategy = "upgrade"
+    job.review_verdict = "approve"
     d = serialize_job(job)
     assert d["issue_number"] == 7
     assert d["advisory"] == "GHSA-7"
     assert d["status"] == JobStatus.QUEUED.value
     assert d["pr_url"] == "https://example/pr/7"
     assert d["fix_strategy"] == "upgrade"
+    assert d["review_verdict"] == "approve"
 
 
 def test_report_shows_strategy_and_specific_blocker():
@@ -187,3 +189,20 @@ def test_report_shows_strategy_and_specific_blocker():
     # Escalations section prefers residual_risk_or_blocker over the generic error.
     assert "Transitive pin conflicts with an incompatible parent." in html
     assert "session ended without a successful PR" not in html
+
+
+def test_report_shows_review_gate_and_blocking_issues():
+    from app.dashboard import render_report
+    b = _mk(3, "high", "k3")
+    j = db.get_job(b.id)
+    j.status = JobStatus.SUCCEEDED
+    j.pr_url = "https://github.com/o/r/pull/3"
+    j.review_verdict = "request_changes"
+    j.review_summary = "Coverage gap. Blocking: Regression test misses the embedded-guest path."
+    db.update_job(j)
+
+    html = render_report()
+    assert "<th>Review</th>" in html
+    assert "b-request_changes" in html  # amber verdict badge in the trace
+    # The Review gate section surfaces the concrete blocking issue.
+    assert "embedded-guest" in html
