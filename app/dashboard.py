@@ -156,7 +156,9 @@ h1{font-size:22px;font-weight:600;margin-bottom:4px}
 h2{font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;
   color:%(muted)s;margin:32px 0 12px}
 .sub{color:%(muted)s;font-size:13px;margin-bottom:24px}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:1000px){.tiles{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:560px){.tiles{grid-template-columns:1fr}}
 .tile{background:%(panel)s;border:1px solid %(border)s;border-radius:10px;padding:16px}
 .tile .cap{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:%(muted)s}
 .tile .val{font-size:26px;font-weight:600;margin-top:6px}
