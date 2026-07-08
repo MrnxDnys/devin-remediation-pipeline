@@ -58,7 +58,8 @@ def _migrate(c: sqlite3.Connection) -> None:
     """Additively add newer nullable columns to an existing `jobs` table.
     Keeps pre-existing SQLite dev DBs working without a rebuild."""
     have = {r["name"] for r in c.execute("PRAGMA table_info(jobs)").fetchall()}
-    for col in ("fix_strategy", "tests_run", "residual_risk_or_blocker",
+    for col in ("finding_type", "source", "severity",
+                "fix_strategy", "tests_run", "residual_risk_or_blocker",
                 "review_verdict", "review_summary", "review_session_url"):
         if col not in have:
             c.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
