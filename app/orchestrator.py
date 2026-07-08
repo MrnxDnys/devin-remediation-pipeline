@@ -229,7 +229,10 @@ def _attempt(job: Job) -> str:
     job.tests_run = out.get("tests_run")
     job.residual_risk_or_blocker = out.get("residual_risk_or_blocker")
 
-    if out.get("success") and pr_url:
+    # A PR being opened is the success signal. Devin may leave the session running ("awaiting
+    # instructions") afterwards, and structured_output may not be filled yet - so we treat a PR
+    # as success unless Devin explicitly reported success=false.
+    if pr_url and out.get("success") is not False:
         job.status = JobStatus.SUCCEEDED
         job.pr_url = pr_url
         job.summary = out.get("summary")
@@ -258,7 +261,12 @@ def _poll_until_terminal(client, session_id: str, job: Job) -> dict | None:
     stop = DEVIN_TERMINAL_STATES | DEVIN_BLOCKED_STATES
     while time.time() < deadline:
         detail = client.get_session(session_id)
-        if (detail.get("status_enum") or "").lower() in stop:
+        # Resolve as soon as the session produces a result: a Devin session often keeps running
+        # ("awaiting instructions") after opening a PR or returning its structured verdict, so we
+        # don't wait for it to formally exit.
+        if ((detail.get("status_enum") or "").lower() in stop
+                or detail.get("pull_request")
+                or detail.get("structured_output")):
             return detail
         time.sleep(settings.poll_interval_seconds)
     db.add_event("timeout", f"#{job.issue_number} exceeded session timeout", job.id)
