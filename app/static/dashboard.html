@@ -138,6 +138,16 @@ function reviewBadge(v){
   return `<span class="badge b-${esc(v)}">${esc(v.replace("_"," "))}</span>`;
 }
 
+// Make feed messages clickable. Input is ALREADY HTML-escaped, and the only things we wrap
+// are full URLs and 32-hex Devin session ids - both safe character sets - so no XSS risk.
+function linkifyFeed(s){
+  return s
+    .replace(/(https?:\/\/[^\s]+)/g,
+             '<a href="$1" target="_blank" rel="noopener">$1</a>')
+    .replace(/\b([0-9a-f]{32})\b/g,
+             '<a href="https://app.devin.ai/sessions/$1" target="_blank" rel="noopener">$1</a>');
+}
+
 async function refresh(){
   try{
     const [m, jobs, events] = await Promise.all([
@@ -216,7 +226,7 @@ function renderFeed(events){
     try{ ts = new Date(e.ts).toLocaleTimeString(); }catch(_){}
     return `<div class="ev"><span class="ts">${esc(ts)}</span>`
       + `<span class="k">${esc(e.kind)}</span>`
-      + `<div class="m">${esc(e.message)}</div></div>`;
+      + `<div class="m">${linkifyFeed(esc(e.message))}</div></div>`;
   }).join("");
 }
 
