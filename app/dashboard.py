@@ -144,6 +144,7 @@ def serialize_job(job: Job) -> dict:
         "finding_type": job.finding_type,
         "advisory": job.vulnerability_id,
         "status": job.status.value,
+        "fix_strategy": job.fix_strategy,
         "pr_url": job.pr_url,
         "devin_session_url": job.devin_session_url,
         "summary": job.summary,
@@ -249,6 +250,12 @@ def _severity_cell(severity: str) -> str:
     return f'<span class="{cls}">{_e(severity)}</span>'
 
 
+def _strategy_cell(strategy: str | None) -> str:
+    if not (strategy or "").strip():
+        return '<span class="muted">-</span>'
+    return _e(strategy)
+
+
 def render_report() -> str:
     m = metrics_summary()
     jobs = db.list_jobs()
@@ -292,19 +299,21 @@ def render_report() -> str:
             f"<td>{_severity_cell(j.severity)}</td>"
             f"<td>{_e(j.finding_type)}</td>"
             f'<td class="muted">{_e(j.vulnerability_id)}</td>'
+            f"<td>{_strategy_cell(j.fix_strategy)}</td>"
             f"<td>{_status_badge(j.status.value)}</td>"
             f"<td>{pr}</td>"
             f"<td>{session}</td>"
             "</tr>"
         )
     table_html = "".join(rows) or (
-        '<tr><td colspan="7" class="muted">No findings yet.</td></tr>'
+        '<tr><td colspan="8" class="muted">No findings yet.</td></tr>'
     )
 
     if escalated:
         esc_items = []
         for j in escalated:
-            blocker = (j.error or j.summary or "No blocker recorded.").strip()
+            blocker = (j.residual_risk_or_blocker or j.error or j.summary
+                       or "No blocker recorded.").strip()
             esc_items.append(
                 f'<div class="esc"><div class="t">#{_e(j.issue_number)} '
                 f'{_e(j.issue_title)}</div>'
@@ -331,7 +340,7 @@ def render_report() -> str:
 <h2>Per-finding trace</h2>
 <table>
 <thead><tr><th>Issue</th><th>Severity</th><th>Type</th><th>Advisory</th>
-<th>Status</th><th>PR</th><th>Session</th></tr></thead>
+<th>Strategy</th><th>Status</th><th>PR</th><th>Session</th></tr></thead>
 <tbody>{table_html}</tbody>
 </table>
 
