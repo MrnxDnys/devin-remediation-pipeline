@@ -80,9 +80,12 @@ class MockDevinClient:
     """In-process fake mirroring the v3 status vocabulary. Deterministic; runs the whole
     loop with no key for tests and keyless review. NOT the source of the live demo."""
 
-    _polls: dict[str, int] = {}
-    _meta: dict[str, dict] = {}
     POLLS_TO_FINISH = 2
+
+    def __init__(self) -> None:
+        # Instance state so it does not bleed across get_client() calls / tests.
+        self._polls: dict[str, int] = {}
+        self._meta: dict[str, dict] = {}
 
     def create_session(
         self, prompt: str, title: str, tags: list[str], schema: dict,
@@ -95,31 +98,71 @@ class MockDevinClient:
         # "force-block" -> suspends awaiting input (escalate-without-retry path).
         self._meta[session_id] = {
             "fail": "force-fail" in tags, "block": "force-block" in tags,
-            "seed": seed, "title": title,
+            "code": "code" in tags, "seed": seed, "title": title,
         }
         return {"session_id": session_id, "url": f"https://app.devin.ai/sessions/{session_id}"}
 
     def get_session(self, session_id: str) -> dict:
         self._polls[session_id] = self._polls.get(session_id, 0) + 1
-        meta = self._meta.get(session_id, {"fail": False, "block": False, "seed": "0" * 12})
+        meta = self._meta.get(
+            session_id, {"fail": False, "block": False, "code": False, "seed": "0" * 12}
+        )
         if self._polls[session_id] < self.POLLS_TO_FINISH:
             return {"status_enum": "running", "structured_output": None,
                     "pull_request": None, "acu_used": 0.0}
         if meta.get("block"):
-            return {"status_enum": "suspended", "structured_output": None,
-                    "pull_request": None, "acu_used": 1.5}
+            return {
+                "status_enum": "suspended",
+                "structured_output": {
+                    "success": False,
+                    "summary": "Suspended awaiting a maintainer decision",
+                    "fix_strategy": "escalate",
+                    "tests_run": "none (blocked before changes)",
+                    "residual_risk_or_blocker": (
+                        "Fix requires dropping Python 3.9 support; needs a maintainer "
+                        "decision before proceeding."
+                    ),
+                },
+                "pull_request": None, "acu_used": 1.5,
+            }
         if meta["fail"]:
-            return {"status_enum": "exit",
-                    "structured_output": {"success": False, "summary": "Could not resolve conflict"},
-                    "pull_request": None, "acu_used": 1.0}
+            return {
+                "status_enum": "exit",
+                "structured_output": {
+                    "success": False,
+                    "summary": "Could not resolve conflict",
+                    "fix_strategy": "escalate",
+                    "tests_run": "pip install (failed to resolve)",
+                    "residual_risk_or_blocker": (
+                        "Transitive pin conflicts with an incompatible parent dependency; "
+                        "no compatible version set exists without a breaking major upgrade."
+                    ),
+                },
+                "pull_request": None, "acu_used": 1.0,
+            }
         pr_number = int(meta["seed"][:4], 16) % 9000 + 1000
         pr_url = f"https://github.com/{settings.github_repo}/pull/{pr_number}"
+        if meta.get("code"):
+            fix_strategy, summary, residual = (
+                "code-fix",
+                f"Fixed authorization logic and added a regression test (mock) for {meta.get('title')}",
+                "None: regression test added covering the privilege-escalation path.",
+            )
+        else:
+            fix_strategy, summary, residual = (
+                "upgrade",
+                f"Bumped dependency and opened PR (mock) for {meta.get('title')}",
+                "None: pinned to the patched version; full test suite green.",
+            )
         return {
             "status_enum": "exit",
             "structured_output": {
                 "success": True,
                 "pr_url": pr_url,
-                "summary": f"Bumped dependency and opened PR (mock) for {meta.get('title')}",
+                "summary": summary,
+                "fix_strategy": fix_strategy,
+                "tests_run": "pytest (targeted suite)",
+                "residual_risk_or_blocker": residual,
             },
             "pull_request": {"url": pr_url},
             "acu_used": 2.0,

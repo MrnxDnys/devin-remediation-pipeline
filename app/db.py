@@ -35,7 +35,9 @@ def init_db() -> None:
                 status TEXT NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0,
                 devin_session_id TEXT, devin_session_url TEXT,
-                pr_url TEXT, summary TEXT, error TEXT, acu_used REAL,
+                pr_url TEXT, summary TEXT,
+                fix_strategy TEXT, tests_run TEXT, residual_risk_or_blocker TEXT,
+                error TEXT, acu_used REAL,
                 created_at TEXT NOT NULL,
                 started_at TEXT, finished_at TEXT
             );
@@ -48,6 +50,16 @@ def init_db() -> None:
             );
             """
         )
+        _migrate(c)
+
+
+def _migrate(c: sqlite3.Connection) -> None:
+    """Additively add newer nullable columns to an existing `jobs` table.
+    Keeps pre-existing SQLite dev DBs working without a rebuild."""
+    have = {r["name"] for r in c.execute("PRAGMA table_info(jobs)").fetchall()}
+    for col in ("fix_strategy", "tests_run", "residual_risk_or_blocker"):
+        if col not in have:
+            c.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
 
 
 def add_event(kind: str, message: str, job_id: int | None = None) -> None:
@@ -107,12 +119,15 @@ def update_job(job: Job) -> None:
         c.execute(
             """UPDATE jobs SET
                status=?, attempts=?, devin_session_id=?, devin_session_url=?,
-               pr_url=?, summary=?, error=?, acu_used=?, started_at=?, finished_at=?
+               pr_url=?, summary=?, fix_strategy=?, tests_run=?,
+               residual_risk_or_blocker=?, error=?, acu_used=?,
+               started_at=?, finished_at=?
                WHERE id=?""",
             (
                 job.status.value, job.attempts, job.devin_session_id,
-                job.devin_session_url, job.pr_url, job.summary, job.error,
-                job.acu_used, job.started_at, job.finished_at, job.id,
+                job.devin_session_url, job.pr_url, job.summary,
+                job.fix_strategy, job.tests_run, job.residual_risk_or_blocker,
+                job.error, job.acu_used, job.started_at, job.finished_at, job.id,
             ),
         )
 

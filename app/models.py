@@ -69,6 +69,9 @@ class Job(BaseModel):
     devin_session_url: str | None = None
     pr_url: str | None = None
     summary: str | None = None
+    fix_strategy: str | None = None            # upgrade | transitive | removal | code-fix | dismiss-false-positive | escalate
+    tests_run: str | None = None               # what Devin ran to verify
+    residual_risk_or_blocker: str | None = None  # residual risk, or the specific blocker if unsuccessful
     error: str | None = None
     acu_used: float | None = None
 

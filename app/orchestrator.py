@@ -106,6 +106,35 @@ def enqueue(issue: dict) -> Job | None:
 # Track worker threads so tests can wait for them deterministically.
 _workers: list[threading.Thread] = []
 
+# Concurrency governance: cap how many sessions run against Devin at once. Findings whose
+# worker thread is blocked here stay QUEUED (no session created yet) until a slot frees.
+_slots_lock = threading.Lock()
+_slots: threading.BoundedSemaphore | None = None
+_slots_size: int = 0
+
+# Observability for tests: peak number of jobs holding a session slot simultaneously.
+_concurrency_lock = threading.Lock()
+_concurrent_now = 0
+max_concurrent_observed = 0
+
+
+def _session_slots() -> threading.BoundedSemaphore:
+    """Return the shared concurrency gate, (re)sized to the current setting."""
+    global _slots, _slots_size
+    desired = max(1, settings.max_concurrent_sessions)
+    with _slots_lock:
+        if _slots is None or _slots_size != desired:
+            _slots = threading.BoundedSemaphore(desired)
+            _slots_size = desired
+        return _slots
+
+
+def reset_concurrency_stats() -> None:
+    global _concurrent_now, max_concurrent_observed
+    with _concurrency_lock:
+        _concurrent_now = 0
+        max_concurrent_observed = 0
+
 
 def join_workers(timeout: float = 5.0) -> None:
     for t in list(_workers):
@@ -114,8 +143,15 @@ def join_workers(timeout: float = 5.0) -> None:
 
 
 def _run(job: Job) -> None:
-    """Full lifecycle for one job (background thread). Retries transient failures;
-    escalates a blocked session or exhausted retries to a human."""
+    """Full lifecycle for one job (background thread). Blocks on a concurrency slot first
+    (staying QUEUED until one frees), then retries transient failures and escalates a
+    blocked session or exhausted retries to a human."""
+    slots = _session_slots()
+    slots.acquire()
+    global _concurrent_now, max_concurrent_observed
+    with _concurrency_lock:
+        _concurrent_now += 1
+        max_concurrent_observed = max(max_concurrent_observed, _concurrent_now)
     try:
         while True:
             outcome = _attempt(job)
@@ -132,6 +168,10 @@ def _run(job: Job) -> None:
         job.finished_at = _now()
         db.update_job(job)
         db.add_event("error", job.error, job.id)
+    finally:
+        with _concurrency_lock:
+            _concurrent_now -= 1
+        slots.release()
 
 
 def _attempt(job: Job) -> str:
@@ -169,6 +209,12 @@ def _attempt(job: Job) -> str:
     job.acu_used = detail.get("acu_used")
     status = (detail.get("status_enum") or "").lower()
     pr_url = out.get("pr_url") or (detail.get("pull_request") or {}).get("url")
+
+    # Persist the rich triage fields (present on both success and failure) so the
+    # leader-facing trace/report can tell the "triage, not just patch" story.
+    job.fix_strategy = out.get("fix_strategy")
+    job.tests_run = out.get("tests_run")
+    job.residual_risk_or_blocker = out.get("residual_risk_or_blocker")
 
     if out.get("success") and pr_url:
         job.status = JobStatus.SUCCEEDED

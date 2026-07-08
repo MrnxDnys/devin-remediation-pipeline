@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     max_retries: int = 1
     poll_interval_seconds: int = 15
     session_timeout_seconds: int = 1800
+    # Cap live Devin sessions to bound blast-radius and ACU cost. Extra findings stay
+    # QUEUED and are picked up as slots free.
+    max_concurrent_sessions: int = 3
 
     # ---- Storage ----
     db_path: str = "data/state.db"
