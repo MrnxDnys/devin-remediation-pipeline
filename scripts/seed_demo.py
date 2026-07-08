@@ -35,8 +35,19 @@ DEMO = [
      dict(finding_type="dependency", source="pip-audit", severity="medium",
           ecosystem="pip", package="paramiko", vulnerability_id="GHSA-r374-rxx8-8654",
           fix_versions="3.6.0", dedup_key="pip:paramiko:GHSA-r374-rxx8-8654")),
+    # Code-level findings from the Security Swarm - Devin fixes these; the independent review
+    # gate approves them (only the privesc above is flagged for extra test coverage).
+    (306, "[HIGH] Hive file-upload: SQL injection via unescaped table/schema name",
+     dict(finding_type="code", source="security-swarm", severity="high",
+          vulnerability_id="SWARM-SUP-SQLI-HIVE", dedup_key="code:SWARM-SUP-SQLI-HIVE")),
+    (307, "[HIGH] RLS bypass: get_column_values cache key omits the RLS context",
+     dict(finding_type="code", source="security-swarm", severity="high",
+          vulnerability_id="SWARM-SUP-RLS-BYPASS", dedup_key="code:SWARM-SUP-RLS-BYPASS")),
+    (308, "[MEDIUM] Open redirect in /redirect via backslash-prefixed path",
+     dict(finding_type="code", source="security-swarm", severity="medium",
+          vulnerability_id="SWARM-SUP-OPENREDIRECT", dedup_key="code:SWARM-SUP-OPENREDIRECT")),
     # Engineered to fail -> demonstrates retry + escalation to a human.
-    (305, "[HIGH] Upgrade transitive dep pinned by an incompatible parent",
+    (309, "[HIGH] Upgrade transitive dep pinned by an incompatible parent",
      dict(finding_type="dependency", source="pip-audit", severity="high",
           ecosystem="pip", package="pyarrow", vulnerability_id="force-fail",
           fix_versions="14.0.1", dedup_key="pip:pyarrow:force-fail")),

@@ -299,7 +299,8 @@ def _review(job: Job) -> None:
     """Second, independent Devin session that audits the fixer's PR and records a verdict.
     Comment-only: never merges. Runs inside the job's existing concurrency slot."""
     client = get_client()
-    tags = ["review", f"issue-{job.issue_number}", job.finding_type, job.severity]
+    tags = ["review", f"issue-{job.issue_number}", job.finding_type, job.severity,
+            job.vulnerability_id or "finding"]
     created = client.create_session(
         prompt=build_review_prompt(job),
         title=f"Review remediation PR for #{job.issue_number} ({job.severity})",

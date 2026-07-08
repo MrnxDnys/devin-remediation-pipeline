@@ -166,15 +166,26 @@ def test_review_gate_approves_dependency_fix():
     assert done.review_summary
 
 
-def test_review_gate_requests_changes_on_code_fix():
+def test_review_gate_requests_changes_on_privesc_fix():
     from app import orchestrator
-    job = orchestrator.enqueue(_code_issue(201))
+    # A finding whose id marks it a privilege-escalation is flagged by the independent gate.
+    job = orchestrator.enqueue(_code_issue(201, vuln_id="SWARM-SUP-PRIVESC-01"))
     orchestrator.join_workers(timeout=10)
     done = db.get_job(job.id)
     assert done.status == JobStatus.SUCCEEDED
     assert done.review_verdict == "request_changes"
     # The gate CAUGHT a concrete, evidenced blocking issue on the highest-stakes item.
-    assert "embedded-guest" in (done.review_summary or "")
+    assert "Gamma write path" in (done.review_summary or "")
+
+
+def test_review_gate_approves_plain_code_fix():
+    from app import orchestrator
+    # A non-privesc code fix passes the gate (most code fixes land clean).
+    job = orchestrator.enqueue(_code_issue(205, vuln_id="SWARM-SUP-SQLI-HIVE"))
+    orchestrator.join_workers(timeout=10)
+    done = db.get_job(job.id)
+    assert done.status == JobStatus.SUCCEEDED
+    assert done.review_verdict == "approve"
 
 
 def test_review_gate_disabled_skips_review(monkeypatch):

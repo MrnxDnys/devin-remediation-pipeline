@@ -99,6 +99,10 @@ class MockDevinClient:
         self._meta[session_id] = {
             "fail": "force-fail" in tags, "block": "force-block" in tags,
             "code": "code" in tags, "review": "review" in tags,
+            # A review whose finding id marks it a privilege-escalation comes back
+            # request_changes (so replay shows the gate catching the hardest fix); every
+            # other fix is approved.
+            "req_changes": any("privesc" in t.lower() for t in tags),
             "seed": seed, "title": title,
         }
         return {"session_id": session_id, "url": f"https://app.devin.ai/sessions/{session_id}"}
@@ -107,7 +111,8 @@ class MockDevinClient:
         self._polls[session_id] = self._polls.get(session_id, 0) + 1
         meta = self._meta.get(
             session_id,
-            {"fail": False, "block": False, "code": False, "review": False, "seed": "0" * 12},
+            {"fail": False, "block": False, "code": False, "review": False,
+             "req_changes": False, "seed": "0" * 12},
         )
         if self._polls[session_id] < self.POLLS_TO_FINISH:
             return {"status_enum": "running", "structured_output": None,
@@ -173,28 +178,28 @@ class MockDevinClient:
         }
 
     def _review_result(self, meta: dict) -> dict:
-        """Independent review-gate verdict. Deterministic: dependency upgrades pass; the
-        code-fix case requests changes with a concrete blocking issue, so replay shows the
-        gate CATCHING something on the highest-stakes item."""
-        if meta.get("code"):
+        """Independent review-gate verdict. Deterministic: the privilege-escalation fix comes
+        back request_changes with a concrete blocking issue (so replay shows the gate CATCHING
+        the hardest item); every other fix - dependency upgrades and other code fixes - passes."""
+        if meta.get("req_changes"):
             output = {
                 "verdict": "request_changes",
                 "confidence": "high",
                 "blocking_issues": [
-                    "Regression test doesn't cover the embedded-guest read path; add "
-                    "coverage before merge."
+                    "Regression test doesn't cover the Gamma write path on data-connection "
+                    "objects; add coverage before merge."
                 ],
-                "checked": ["reproduced the privesc chain", "read the authorization diff"],
-                "summary": "Fix is on the right track but test coverage is incomplete.",
+                "checked": ["reproduced the privilege-escalation chain",
+                            "read the role-restriction diff"],
+                "summary": "Fix is on the right track but the regression test coverage is incomplete.",
             }
         else:
             output = {
                 "verdict": "approve",
                 "confidence": "high",
                 "blocking_issues": [],
-                "checked": ["confirmed the patched version resolves the advisory",
-                            "ran the targeted suite"],
-                "summary": "Minimal, correct dependency upgrade; no regressions found.",
+                "checked": ["confirmed the finding is resolved", "ran the targeted suite"],
+                "summary": "Fix is minimal and correct; no regressions found.",
             }
         return {"status_enum": "exit", "structured_output": output,
                 "pull_request": None, "acu_used": 1.0}
