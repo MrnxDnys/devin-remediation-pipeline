@@ -152,7 +152,9 @@ function renderTiles(m){
     tile("Active", m.active),
     tile("Auto-fixed", m.auto_fixed),
     tile("Escalated", m.escalated),
-    tile("PRs awaiting review", m.prs_awaiting_review),
+    // Display label "PRs opened": JSON key stays prs_awaiting_review for API stability, but the
+    // metric only counts PRs opened (never decreases when a human merges/closes the PR).
+    tile("PRs opened", m.prs_awaiting_review),
     tile("Success rate", m.success_rate_pct + "%"),
     tile("Mean time-to-remediation", fmtDuration(m.mean_time_to_remediation_sec)),
     tile("Throughput / hour", m.throughput_per_hour),
@@ -160,7 +162,8 @@ function renderTiles(m){
 }
 
 function renderSeverity(m){
-  const s = m.by_severity || {};
+  // Open risk only (QUEUED+RUNNING+ESCALATED), matching the "Open findings by severity" heading.
+  const s = m.open_by_severity || {};
   document.getElementById("severity").innerHTML = SEVERITIES.map(k =>
     `<div class="chip"><span class="${sevClass(k)}">${esc(k)}</span>`
     + `<span class="n">${esc(s[k]||0)}</span></div>`

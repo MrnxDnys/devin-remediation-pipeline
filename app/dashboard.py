@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import html
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -22,6 +22,17 @@ _DASHBOARD_HTML = os.path.join(_STATIC_DIR, "dashboard.html")
 
 _SEVERITIES = ("critical", "high", "medium", "low")
 _TERMINAL = (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.ESCALATED)
+
+# Resting states: the true terminal outcomes a job comes to rest in, used as the success-rate
+# denominator. FAILED is deliberately excluded - in this orchestrator a failed attempt either
+# retries back to RUNNING or is escalated; only the unhandled-exception path in _run() leaves a
+# job permanently FAILED. Counting transient FAILED would deflate the rate while a retry pends.
+_RESTING = (JobStatus.SUCCEEDED, JobStatus.ESCALATED)
+
+# "Open" findings = current open risk, not all-time. QUEUED/RUNNING are in-flight; ESCALATED is
+# included because it still needs human action (not resolved). SUCCEEDED (fixed) and transient
+# FAILED (a retry pending) are excluded.
+_OPEN_STATUSES = (JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.ESCALATED)
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -52,16 +63,29 @@ def metrics_summary() -> dict:
         if sev in by_severity:
             by_severity[sev] += 1
 
+    # Open findings by severity: computed over open (non-terminal) jobs only, so the dashboard's
+    # "Open findings by severity" heading reflects open risk rather than every finding ever seen.
+    open_by_severity = {sev: 0 for sev in _SEVERITIES}
+    for job in jobs:
+        if job.status not in _OPEN_STATUSES:
+            continue
+        sev = (job.severity or "").strip().lower()
+        if sev in open_by_severity:
+            open_by_severity[sev] += 1
+
     active = by_status[JobStatus.QUEUED.value] + by_status[JobStatus.RUNNING.value]
     auto_fixed = by_status[JobStatus.SUCCEEDED.value]
     escalated = by_status[JobStatus.ESCALATED.value]
+    failed = by_status[JobStatus.FAILED.value]  # transient "in retry" signal; not a resting state
 
+    # Named for API stability; semantically this is "PRs opened", not "awaiting review": nothing
+    # updates a job after SUCCEEDED, so it never decreases when a human merges/closes the PR.
     prs_awaiting_review = sum(
         1 for j in jobs if j.status == JobStatus.SUCCEEDED and (j.pr_url or "").strip()
     )
 
-    terminal = sum(by_status[s.value] for s in _TERMINAL)
-    success_rate_pct = round(auto_fixed / terminal * 100, 1) if terminal else 0.0
+    resting = sum(by_status[s.value] for s in _RESTING)
+    success_rate_pct = round(auto_fixed / resting * 100, 1) if resting else 0.0
 
     # Mean time-to-remediation over succeeded jobs that carry both timestamps.
     durations: list[float] = []
@@ -74,26 +98,35 @@ def metrics_summary() -> dict:
             durations.append((finished - created).total_seconds())
     mean_ttr = round(sum(durations) / len(durations), 1) if durations else 0.0
 
-    # Throughput: succeeded jobs per hour over the observed window (earliest created_at -> now).
-    throughput_per_hour = 0.0
-    created_times = [t for t in (_parse_ts(j.created_at) for j in jobs) if t]
-    if auto_fixed and created_times:
-        earliest = min(created_times)
-        finished_times = [
-            t for t in (_parse_ts(j.finished_at) for j in jobs) if t
-        ]
-        latest = max([datetime.now(timezone.utc)] + finished_times)
-        window_hours = (latest - earliest).total_seconds() / 3600.0
-        if window_hours > 1e-6:
-            throughput_per_hour = round(auto_fixed / window_hours, 2)
+    # Throughput: a rolling 60-minute window ending now - the count of succeeded jobs whose
+    # finished_at falls within the last hour, over a 1-hour window (i.e. just the in-window
+    # count). This replaces the old all-time average anchored at the earliest created_at, which
+    # decayed forever after a burst-then-idle run.
+    #
+    # We intentionally divide by the full hour (count / 1h) even for a young run, rather than
+    # extrapolating over the elapsed sub-hour window (count / elapsed_hours): extrapolation
+    # explodes for freshly-seeded data (a demo seeded seconds ago would report thousands/hour)
+    # and, worse, *decays* as the window fills toward an hour - the opposite of what we want. The
+    # plain in-window count is already sensible and non-decaying for an early demo: N fixes in the
+    # last hour reads as N. Guarded for missing timestamps (-> 0.0).
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(hours=1)
+    recent_succeeded = [
+        t
+        for t in (_parse_ts(j.finished_at) for j in jobs if j.status == JobStatus.SUCCEEDED)
+        if t and t >= window_start
+    ]
+    throughput_per_hour = round(float(len(recent_succeeded)), 2)
 
     return {
         "total": total,
         "active": active,
         "by_status": by_status,
         "by_severity": by_severity,
+        "open_by_severity": open_by_severity,
         "auto_fixed": auto_fixed,
         "escalated": escalated,
+        "failed": failed,
         "prs_awaiting_review": prs_awaiting_review,
         "success_rate_pct": success_rate_pct,
         "mean_time_to_remediation_sec": mean_ttr,
@@ -227,7 +260,9 @@ def render_report() -> str:
         ("Active", m["active"]),
         ("Auto-fixed", m["auto_fixed"]),
         ("Escalated", m["escalated"]),
-        ("PRs awaiting review", m["prs_awaiting_review"]),
+        # Display label "PRs opened": the JSON key stays prs_awaiting_review for API stability,
+        # but the metric only ever counts PRs opened (it never decreases on human merge/close).
+        ("PRs opened", m["prs_awaiting_review"]),
         ("Success rate", f'{m["success_rate_pct"]}%'),
         ("Mean time-to-remediation", _fmt_duration(m["mean_time_to_remediation_sec"])),
         ("Throughput / hour", m["throughput_per_hour"]),
@@ -238,7 +273,7 @@ def render_report() -> str:
         for cap, val in tiles
     )
 
-    sev = m["by_severity"]
+    sev = m["open_by_severity"]
     sev_html = "".join(
         f'<div class="chip"><span class="{("s-"+s) if s in _SEVERITIES else "muted"}">'
         f'{_e(s)}</span> <span class="n">{sev.get(s, 0)}</span></div>'
