@@ -37,10 +37,14 @@ Every result is a reviewable PR that references its issue; nothing is merged aut
                                                               ┌──────────────────────────┤
                                                               ▼                          ▼
                                                      reviewable PR (Fixes #n)     escalate w/ blocker
-                                                     comment back on issue        (label devin-failed)
+                                                              │                   (label devin-failed)
+                                                              ▼
+                                          2nd, independent Devin reviews the PR → verdict
+                                          (approve / request_changes / reject); comment-only,
+                                          a human still merges. Status commented on the issue.
                                                               │
-                    live dashboard  ◀── metrics from job state (severity, MTTR, success, throughput)
-                  (Devin dark-mode UI)
+                    live dashboard  ◀── metrics from job state (severity, MTTR, success,
+                  (Devin dark-mode UI)     throughput, fix strategy, review verdict)
 ```
 
 ## How it maps to Devin
@@ -56,6 +60,9 @@ Every result is a reviewable PR that references its issue; nothing is merged aut
 - **Structured output** - each session returns a machine-parseable verdict
   (`success`, `pr_url`, `fix_strategy`, `tests_run`, `residual_risk_or_blocker`) the orchestrator
   uses to decide: comment the PR, retry once, or escalate.
+- **Independent review gate** - after a fix opens a PR, a *second, independent* Devin session
+  audits it (adversarial prompt; it did not write the PR) and returns a structured verdict
+  (`approve` / `request_changes` / `reject` + blocking issues), commented back on the issue.
 
 ## Observability - "how would a leader know it's working?"
 
@@ -64,7 +71,8 @@ A live dashboard (styled to Devin's dark-mode aesthetic) at `http://localhost:80
 - Open findings **by severity** (critical / high / medium / low).
 - **Auto-fixed**, **escalated**, **PRs opened**, **success rate**.
 - **Mean time-to-remediation** (issue → PR) and **throughput/hour**.
-- A per-finding trace: issue → severity → status → PR link → Devin session link.
+- A per-finding trace: issue → severity → **fix strategy** → **review verdict** → status → PR
+  link → Devin session link.
 
 No cost/$ panel: ACUs read `0.0` on this (self-serve) org, and a fabricated ROI number would
 subtract credibility with an engineering audience. The dashboard reports what actually happened.
@@ -127,6 +135,10 @@ For a real GitHub webhook, point `issues` deliveries at `/webhook/github` (HMAC-
 - **Bounded fan-out:** a concurrency cap (`MAX_CONCURRENT_SESSIONS`) limits how many Devin sessions
   run at once; further findings stay queued until a slot frees - so a large backlog can't spike
   cost or blast radius.
+- **Independent review gate:** after a fix opens a PR, a second, independent Devin session reviews
+  it and records a verdict (`ENABLE_REVIEW_GATE`, default `true`). It is **comment-only** -
+  `AUTO_MERGE_ON_APPROVE` defaults to `false`, and even if enabled it only records a would-merge
+  decision; it never merges. A human always merges.
 - **Blast radius = a PR.** The system **never auto-merges** and never touches upstream
   `apache/superset` - a human reviews every change. Failures escalate (label `devin-failed`) with
   the specific blocker rather than shipping a broken PR.
@@ -136,7 +148,7 @@ For a real GitHub webhook, point `issues` deliveries at `/webhook/github` (HMAC-
 
 | Path | What |
 |------|------|
-| `app/orchestrator.py` | session lifecycle: create → poll → parse structured output → decide |
+| `app/orchestrator.py` | session lifecycle: create → poll → parse structured output → decide → independent review gate |
 | `app/devin_client.py` | Devin v3 client (live) + deterministic replay fake, one interface |
 | `app/scanner.py` | scheduled `pip-audit` + `npm audit` → files `devin-auto` issues |
 | `app/webhook.py` | `issues.labeled` webhook + `/trigger/simulate` + `/scan` |
