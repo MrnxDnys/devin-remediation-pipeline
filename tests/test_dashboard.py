@@ -155,8 +155,35 @@ def test_serialize_job_shape():
     job.pr_url = "https://example/pr/7"
     job.devin_session_url = "https://app.devin.ai/sessions/x"
     job.summary = "did the thing"
+    job.fix_strategy = "upgrade"
     d = serialize_job(job)
     assert d["issue_number"] == 7
     assert d["advisory"] == "GHSA-7"
     assert d["status"] == JobStatus.QUEUED.value
     assert d["pr_url"] == "https://example/pr/7"
+    assert d["fix_strategy"] == "upgrade"
+
+
+def test_report_shows_strategy_and_specific_blocker():
+    from app.dashboard import render_report
+    a = _mk(1, "high", "k1")
+    fresh = db.get_job(a.id)
+    fresh.status = JobStatus.SUCCEEDED
+    fresh.pr_url = "https://github.com/o/r/pull/1"
+    fresh.fix_strategy = "upgrade"
+    db.update_job(fresh)
+
+    b = _mk(2, "high", "k2")
+    esc = db.get_job(b.id)
+    esc.status = JobStatus.ESCALATED
+    esc.fix_strategy = "escalate"
+    esc.residual_risk_or_blocker = "Transitive pin conflicts with an incompatible parent."
+    esc.error = "session ended without a successful PR"
+    db.update_job(esc)
+
+    html = render_report()
+    assert "<th>Strategy</th>" in html
+    assert "upgrade" in html
+    # Escalations section prefers residual_risk_or_blocker over the generic error.
+    assert "Transitive pin conflicts with an incompatible parent." in html
+    assert "session ended without a successful PR" not in html

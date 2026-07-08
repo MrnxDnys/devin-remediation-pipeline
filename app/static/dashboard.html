@@ -89,7 +89,7 @@
     <table>
       <thead><tr>
         <th>Issue</th><th>Severity</th><th>Type</th><th>Advisory</th>
-        <th>Status</th><th>PR</th><th>Session</th>
+        <th>Strategy</th><th>Status</th><th>PR</th><th>Session</th>
       </tr></thead>
       <tbody id="jobs"></tbody>
     </table>
@@ -173,7 +173,7 @@ function renderSeverity(m){
 function renderJobs(jobs){
   const body = document.getElementById("jobs");
   if(!jobs.length){
-    body.innerHTML = '<tr><td colspan="7" class="muted">No findings yet.</td></tr>';
+    body.innerHTML = '<tr><td colspan="8" class="muted">No findings yet.</td></tr>';
     return;
   }
   body.innerHTML = jobs.map(j => {
@@ -187,6 +187,7 @@ function renderJobs(jobs){
       + `<td><span class="${sevClass(j.severity)}">${esc(j.severity)}</span></td>`
       + `<td>${esc(j.finding_type)}</td>`
       + `<td class="muted">${esc(j.advisory)}</td>`
+      + `<td>${j.fix_strategy ? esc(j.fix_strategy) : '<span class="muted">-</span>'}</td>`
       + `<td><span class="badge b-${esc(j.status)}">${esc(j.status)}</span></td>`
       + `<td>${pr}</td><td>${ss}</td>`
       + "</tr>";
