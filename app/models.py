@@ -19,8 +19,9 @@ class JobStatus(str, Enum):
 DEVIN_TERMINAL_STATES = {"exit", "error"}
 DEVIN_BLOCKED_STATES = {"suspended"}
 
-# Where a finding came from - so the pipeline can show provenance (scanners and Cognition's
-# Security Swarm FIND; this system FIXES).
+# Where a finding came from - so the pipeline can show provenance. Scanners and Cognition's
+# Security Swarm surface findings (Swarm also triages and can fix); this system orchestrates
+# the remediation across the queue under governance.
 FINDING_SOURCES = {"pip-audit", "npm-audit", "security-swarm", "manual"}
 
 

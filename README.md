@@ -4,19 +4,13 @@ An event-driven automation, built on the **Devin v3 Sessions API**, that autonom
 **remediates security findings** in a fork of Apache Superset into reviewable pull requests -
 and gives an engineering leader a live view of whether it is working.
 
-> **The bet:** *finding* vulnerabilities is a solved problem - scanners, and Cognition's own
-> Security Swarm. *Fixing* them is where teams drown, because every fix needs real engineering
-> judgement and they pile up as risk. This system is the **fix half**: findings land as an
-> event, a fleet of Devin sessions each remediate one, and a dashboard shows what is fixed,
-> in-flight, and escalated.
-
 Target repository (what Devin remediates):
 [`MrnxDnys/superset`](https://github.com/MrnxDnys/superset).
 
-## Why Devin (and not a script)
+## What each Devin session does
 
-A scanner or Dependabot can *flag* a finding and bump a version. Only an autonomous agent can do
-the engineering the fix actually needs, and do it across a backlog in parallel:
+Each finding is handed to a Devin session that performs the remediation a version-bump bot can't -
+it triages the finding and applies the correct fix. Examples from the fork:
 
 - **Triage, not just patch.** On a flagged "malicious" npm package, Devin proved it was a
   **false positive** (a name collision) and fixed the root cause - instead of deleting working
@@ -27,8 +21,7 @@ the engineering the fix actually needs, and do it across a backlog in parallel:
   in the SemanticLayer that a dependency scanner structurally cannot see - Devin fixes the flawed
   authorization logic and adds a regression test.
 
-That is **judgement × scale**: the same senior-engineer judgement applied across the whole
-backlog, in parallel, with a human on every merge.
+Every result is a reviewable PR that references its issue; nothing is merged automatically.
 
 ## Architecture
 
@@ -69,7 +62,7 @@ backlog, in parallel, with a human on every merge.
 A live dashboard (styled to Devin's dark-mode aesthetic) at `http://localhost:8000/`:
 
 - Open findings **by severity** (critical / high / medium / low).
-- **Auto-fixed**, **escalated**, **PRs awaiting review**, **success rate**.
+- **Auto-fixed**, **escalated**, **PRs opened**, **success rate**.
 - **Mean time-to-remediation** (issue → PR) and **throughput/hour**.
 - A per-finding trace: issue → severity → status → PR link → Devin session link.
 
@@ -99,7 +92,7 @@ DEVIN_MODE=replay python -m scripts.seed_demo            # drive findings throug
 
 The replay uses an in-process fake Devin (`app/devin_client.py`) that mirrors the v3 session
 lifecycle and structured-output contract deterministically, so the dashboard populates with a
-critical code fix, dependency fixes, and one escalated finding - no network, no credits.
+high-severity code fix, dependency fixes, and one escalated finding - no network, no credits.
 
 ### Live (real Devin sessions on the fork)
 
@@ -131,6 +124,9 @@ For a real GitHub webhook, point `issues` deliveries at `/webhook/github` (HMAC-
 - **Least privilege:** a service-user `cog_` credential scoped to `ManageOrgSessions`.
 - **Budget guardrail:** every session sets `max_acu_limit` so one runaway session can't drain the
   account.
+- **Bounded fan-out:** a concurrency cap (`MAX_CONCURRENT_SESSIONS`) limits how many Devin sessions
+  run at once; further findings stay queued until a slot frees - so a large backlog can't spike
+  cost or blast radius.
 - **Blast radius = a PR.** The system **never auto-merges** and never touches upstream
   `apache/superset` - a human reviews every change. Failures escalate (label `devin-failed`) with
   the specific blocker rather than shipping a broken PR.

@@ -1,1 +1,1 @@
-"""Governed backlog-burndown campaign orchestrator for Devin."""
+"""Autonomous security-remediation pipeline for Apache Superset, built on the Devin v3 API."""

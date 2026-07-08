@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     # One branching Playbook: dependency-upgrade / code-fix / dismiss-with-evidence.
     devin_playbook_id: str = ""
 
-    # ---- GitHub (Dependabot/scan issue feed + issue write-back) ----
+    # ---- GitHub (scan-filed issue feed + issue write-back) ----
     github_token: str = ""
     github_repo: str = "MrnxDnys/superset"
     github_webhook_secret: str = "change_me"

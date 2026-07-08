@@ -11,7 +11,7 @@ from app.models import JobStatus
 @pytest.fixture(autouse=True)
 def fast_mock(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "db_path", str(tmp_path / "test.db"))
-    monkeypatch.setattr(settings, "devin_mode", "mock")
+    monkeypatch.setattr(settings, "devin_mode", "replay")
     monkeypatch.setattr(settings, "poll_interval_seconds", 0)
     monkeypatch.setattr(settings, "session_timeout_seconds", 10)
     monkeypatch.setattr(settings, "max_retries", 1)
