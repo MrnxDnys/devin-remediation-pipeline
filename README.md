@@ -81,6 +81,10 @@ subtract credibility with an engineering audience. The dashboard reports what ac
 
 Two modes. **Replay** needs no keys or credits - a reviewer can run the whole loop at their desk.
 
+> **No webhook or tunnel is needed to run or simulate.** `scripts/seed_demo.py` drives the whole
+> pipeline in-process, and `POST /trigger/simulate` replays a labelled-issue event locally. The
+> GitHub webhook is only the *live* inbound trigger (see Live) - not a dependency for running it.
+
 ### Replay / simulate (no Devin key, no GitHub)
 
 ```bash
