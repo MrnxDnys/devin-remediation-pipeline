@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Devin Security-Remediation</title>
+<style>
+  :root{
+    --bg:#0b0b0d; --panel:#141417; --border:#242428; --text:#ededf0; --muted:#86868c;
+    --accent:#8b5cf6; --success:#3fb950; --amber:#e0912f; --danger:#f0563f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--text);
+    font-family:Inter,system-ui,sans-serif; line-height:1.5;
+    padding:28px 32px; max-width:1280px; margin:0 auto;
+    -webkit-font-smoothing:antialiased;
+  }
+  header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:24px}
+  h1{font-size:20px;font-weight:600}
+  h1 .dot{color:var(--accent)}
+  .sub{color:var(--muted);font-size:12px}
+  .cap{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);
+    font-weight:600;margin:28px 0 12px}
+
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+  .tile{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px}
+  .tile .val{font-size:26px;font-weight:600;margin-top:8px}
+
+  .sev{display:flex;gap:10px;flex-wrap:wrap}
+  .chip{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    padding:10px 16px;display:flex;align-items:center;gap:8px;font-size:13px}
+  .chip .n{font-size:18px;font-weight:600}
+
+  .grid{display:grid;grid-template-columns:2fr 1fr;gap:20px;align-items:start}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+
+  table{width:100%;border-collapse:collapse;background:var(--panel);
+    border:1px solid var(--border);border-radius:10px;overflow:hidden;font-size:13px}
+  th{text-align:left;text-transform:uppercase;letter-spacing:.06em;font-size:11px;
+    color:var(--muted);font-weight:600;padding:10px 12px;border-bottom:1px solid var(--border)}
+  td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  .title{max-width:420px}
+  .title .n{color:var(--muted)}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;
+    font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .b-succeeded{background:rgba(63,185,80,.15);color:var(--success)}
+  .b-failed,.b-escalated{background:rgba(240,86,63,.15);color:var(--danger)}
+  .b-running{background:rgba(139,92,246,.15);color:var(--accent)}
+  .b-queued{background:rgba(134,134,140,.15);color:var(--muted)}
+  .s-critical{color:var(--danger);font-weight:600}
+  .s-high{color:var(--amber);font-weight:600}
+  .s-medium,.s-low{color:var(--muted)}
+  .muted{color:var(--muted)}
+
+  .feed{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    padding:6px 0;max-height:520px;overflow:auto}
+  .ev{padding:8px 14px;border-bottom:1px solid var(--border);font-size:12px}
+  .feed .ev:last-child{border-bottom:none}
+  .ev .k{color:var(--accent);text-transform:uppercase;letter-spacing:.04em;font-size:10px}
+  .ev .ts{color:var(--muted);font-size:10px;float:right}
+  .ev .m{margin-top:2px}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Security-Remediation <span class="dot">&bull;</span> Live</h1>
+    <div class="sub">Autonomous fixes into reviewable PRs &mdash; derived from job state</div>
+  </div>
+  <div class="sub"><a href="/report">open report &rarr;</a> &middot; <span id="updated">&hellip;</span></div>
+</header>
+
+<div class="tiles" id="tiles"></div>
+
+<h2>Open findings by severity</h2>
+<div class="sev" id="severity"></div>
+
+<div class="grid">
+  <div>
+    <h2>Per-finding trace</h2>
+    <table>
+      <thead><tr>
+        <th>Issue</th><th>Severity</th><th>Type</th><th>Advisory</th>
+        <th>Status</th><th>PR</th><th>Session</th>
+      </tr></thead>
+      <tbody id="jobs"></tbody>
+    </table>
+  </div>
+  <div>
+    <h2>Recent activity</h2>
+    <div class="feed" id="feed"></div>
+  </div>
+</div>
+
+<script>
+const SEVERITIES = ["critical","high","medium","low"];
+
+function esc(v){
+  if(v===null||v===undefined) return "";
+  return String(v).replace(/[&<>"']/g, c => (
+    {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]
+  ));
+}
+
+function fmtDuration(sec){
+  sec = Math.round(sec||0);
+  if(sec < 60) return sec + "s";
+  const m = Math.floor(sec/60), s = sec%60;
+  if(m < 60) return m + "m " + s + "s";
+  const h = Math.floor(m/60);
+  return h + "h " + (m%60) + "m";
+}
+
+function tile(cap, val){
+  return `<div class="tile"><div class="cap">${esc(cap)}</div><div class="val">${esc(val)}</div></div>`;
+}
+
+function sevClass(s){
+  s = (s||"").toLowerCase();
+  return SEVERITIES.includes(s) ? "s-"+s : "muted";
+}
+
+async function refresh(){
+  try{
+    const [m, jobs, events] = await Promise.all([
+      fetch("/api/metrics").then(r=>r.json()),
+      fetch("/api/jobs").then(r=>r.json()),
+      fetch("/api/events").then(r=>r.json()),
+    ]);
+    renderTiles(m);
+    renderSeverity(m);
+    renderJobs(jobs);
+    renderFeed(events);
+    document.getElementById("updated").textContent =
+      "updated " + new Date().toLocaleTimeString();
+  }catch(e){
+    document.getElementById("updated").textContent = "reconnecting\u2026";
+  }
+}
+
+function renderTiles(m){
+  document.getElementById("tiles").innerHTML = [
+    tile("Findings", m.total),
+    tile("Active", m.active),
+    tile("Auto-fixed", m.auto_fixed),
+    tile("Escalated", m.escalated),
+    tile("PRs awaiting review", m.prs_awaiting_review),
+    tile("Success rate", m.success_rate_pct + "%"),
+    tile("Mean time-to-remediation", fmtDuration(m.mean_time_to_remediation_sec)),
+    tile("Throughput / hour", m.throughput_per_hour),
+  ].join("");
+}
+
+function renderSeverity(m){
+  const s = m.by_severity || {};
+  document.getElementById("severity").innerHTML = SEVERITIES.map(k =>
+    `<div class="chip"><span class="${sevClass(k)}">${esc(k)}</span>`
+    + `<span class="n">${esc(s[k]||0)}</span></div>`
+  ).join("");
+}
+
+function renderJobs(jobs){
+  const body = document.getElementById("jobs");
+  if(!jobs.length){
+    body.innerHTML = '<tr><td colspan="7" class="muted">No findings yet.</td></tr>';
+    return;
+  }
+  body.innerHTML = jobs.map(j => {
+    const pr = j.pr_url ? `<a href="${esc(j.pr_url)}" target="_blank" rel="noopener">PR</a>`
+                        : '<span class="muted">-</span>';
+    const ss = j.devin_session_url
+      ? `<a href="${esc(j.devin_session_url)}" target="_blank" rel="noopener">session</a>`
+      : '<span class="muted">-</span>';
+    return "<tr>"
+      + `<td class="title"><span class="n">#${esc(j.issue_number)}</span> ${esc(j.issue_title)}</td>`
+      + `<td><span class="${sevClass(j.severity)}">${esc(j.severity)}</span></td>`
+      + `<td>${esc(j.finding_type)}</td>`
+      + `<td class="muted">${esc(j.advisory)}</td>`
+      + `<td><span class="badge b-${esc(j.status)}">${esc(j.status)}</span></td>`
+      + `<td>${pr}</td><td>${ss}</td>`
+      + "</tr>";
+  }).join("");
+}
+
+function renderFeed(events){
+  const feed = document.getElementById("feed");
+  if(!events.length){
+    feed.innerHTML = '<div class="ev muted">No activity yet.</div>';
+    return;
+  }
+  feed.innerHTML = events.map(e => {
+    let ts = e.ts || "";
+    try{ ts = new Date(e.ts).toLocaleTimeString(); }catch(_){}
+    return `<div class="ev"><span class="ts">${esc(ts)}</span>`
+      + `<span class="k">${esc(e.kind)}</span>`
+      + `<div class="m">${esc(e.message)}</div></div>`;
+  }).join("");
+}
+
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>
