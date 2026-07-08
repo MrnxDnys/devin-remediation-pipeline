@@ -55,6 +55,9 @@
   .b-failed,.b-escalated{background:rgba(240,86,63,.15);color:var(--danger)}
   .b-running{background:rgba(139,92,246,.15);color:var(--accent)}
   .b-queued{background:rgba(134,134,140,.15);color:var(--muted)}
+  .b-approve{background:rgba(63,185,80,.15);color:var(--success)}
+  .b-request_changes{background:rgba(224,145,47,.15);color:var(--amber)}
+  .b-reject{background:rgba(240,86,63,.15);color:var(--danger)}
   .s-critical{color:var(--danger);font-weight:600}
   .s-high{color:var(--amber);font-weight:600}
   .s-medium,.s-low{color:var(--muted)}
@@ -89,7 +92,7 @@
     <table>
       <thead><tr>
         <th>Issue</th><th>Severity</th><th>Type</th><th>Advisory</th>
-        <th>Strategy</th><th>Status</th><th>PR</th><th>Session</th>
+        <th>Strategy</th><th>Review</th><th>Status</th><th>PR</th><th>Session</th>
       </tr></thead>
       <tbody id="jobs"></tbody>
     </table>
@@ -126,6 +129,13 @@ function tile(cap, val){
 function sevClass(s){
   s = (s||"").toLowerCase();
   return SEVERITIES.includes(s) ? "s-"+s : "muted";
+}
+
+const REVIEW_VERDICTS = ["approve","request_changes","reject"];
+function reviewBadge(v){
+  v = (v||"").toLowerCase();
+  if(!REVIEW_VERDICTS.includes(v)) return '<span class="muted">-</span>';
+  return `<span class="badge b-${esc(v)}">${esc(v.replace("_"," "))}</span>`;
 }
 
 async function refresh(){
@@ -173,7 +183,7 @@ function renderSeverity(m){
 function renderJobs(jobs){
   const body = document.getElementById("jobs");
   if(!jobs.length){
-    body.innerHTML = '<tr><td colspan="8" class="muted">No findings yet.</td></tr>';
+    body.innerHTML = '<tr><td colspan="9" class="muted">No findings yet.</td></tr>';
     return;
   }
   body.innerHTML = jobs.map(j => {
@@ -188,6 +198,7 @@ function renderJobs(jobs){
       + `<td>${esc(j.finding_type)}</td>`
       + `<td class="muted">${esc(j.advisory)}</td>`
       + `<td>${j.fix_strategy ? esc(j.fix_strategy) : '<span class="muted">-</span>'}</td>`
+      + `<td>${reviewBadge(j.review_verdict)}</td>`
       + `<td><span class="badge b-${esc(j.status)}">${esc(j.status)}</span></td>`
       + `<td>${pr}</td><td>${ss}</td>`
       + "</tr>";

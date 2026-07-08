@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     # QUEUED and are picked up as slots free.
     max_concurrent_sessions: int = 3
 
+    # ---- Review gate (independent "Devin reviews Devin" audit of every opened PR) ----
+    # A second, independent Devin session audits the fixer's PR and returns a verdict.
+    enable_review_gate: bool = True
+    # DEFAULT FALSE. Even when true, the gate only RECORDS a "would-merge" decision; it never
+    # performs an actual merge in this pipeline - a human always approves.
+    auto_merge_on_approve: bool = False
+
     # ---- Storage ----
     db_path: str = "data/state.db"
 

@@ -72,6 +72,10 @@ class Job(BaseModel):
     fix_strategy: str | None = None            # upgrade | transitive | removal | code-fix | dismiss-false-positive | escalate
     tests_run: str | None = None               # what Devin ran to verify
     residual_risk_or_blocker: str | None = None  # residual risk, or the specific blocker if unsuccessful
+    # Independent review-gate verdict on the opened PR (a second, independent Devin session).
+    review_verdict: str | None = None          # approve | request_changes | reject
+    review_summary: str | None = None          # reviewer's one-line rationale + blocking issues
+    review_session_url: str | None = None       # the independent reviewer session
     error: str | None = None
     acu_used: float | None = None
 
@@ -103,3 +107,37 @@ STRUCTURED_OUTPUT_SCHEMA = {
     },
     "required": ["success", "summary"],
 }
+
+
+# JSON Schema for the independent review-gate session. A SECOND Devin session audits the
+# fixer's PR and returns this adversarial verdict; the orchestrator records + comments it.
+REVIEW_VERDICT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdict": {
+            "type": "string",
+            "enum": ["approve", "request_changes", "reject"],
+            "description": "approve | request_changes | reject",
+        },
+        "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "reviewer's confidence in the verdict",
+        },
+        "blocking_issues": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "concrete problems that block merge",
+        },
+        "checked": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "what the reviewer independently verified",
+        },
+        "summary": {"type": "string", "description": "one-sentence review rationale"},
+    },
+    "required": ["verdict", "summary"],
+}
+
+# Review verdicts. approve = mergeable; request_changes = fixable problems; reject = do not merge.
+REVIEW_VERDICTS = {"approve", "request_changes", "reject"}

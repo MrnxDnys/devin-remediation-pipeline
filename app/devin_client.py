@@ -98,18 +98,22 @@ class MockDevinClient:
         # "force-block" -> suspends awaiting input (escalate-without-retry path).
         self._meta[session_id] = {
             "fail": "force-fail" in tags, "block": "force-block" in tags,
-            "code": "code" in tags, "seed": seed, "title": title,
+            "code": "code" in tags, "review": "review" in tags,
+            "seed": seed, "title": title,
         }
         return {"session_id": session_id, "url": f"https://app.devin.ai/sessions/{session_id}"}
 
     def get_session(self, session_id: str) -> dict:
         self._polls[session_id] = self._polls.get(session_id, 0) + 1
         meta = self._meta.get(
-            session_id, {"fail": False, "block": False, "code": False, "seed": "0" * 12}
+            session_id,
+            {"fail": False, "block": False, "code": False, "review": False, "seed": "0" * 12},
         )
         if self._polls[session_id] < self.POLLS_TO_FINISH:
             return {"status_enum": "running", "structured_output": None,
                     "pull_request": None, "acu_used": 0.0}
+        if meta.get("review"):
+            return self._review_result(meta)
         if meta.get("block"):
             return {
                 "status_enum": "suspended",
@@ -167,6 +171,33 @@ class MockDevinClient:
             "pull_request": {"url": pr_url},
             "acu_used": 2.0,
         }
+
+    def _review_result(self, meta: dict) -> dict:
+        """Independent review-gate verdict. Deterministic: dependency upgrades pass; the
+        code-fix case requests changes with a concrete blocking issue, so replay shows the
+        gate CATCHING something on the highest-stakes item."""
+        if meta.get("code"):
+            output = {
+                "verdict": "request_changes",
+                "confidence": "high",
+                "blocking_issues": [
+                    "Regression test doesn't cover the embedded-guest read path; add "
+                    "coverage before merge."
+                ],
+                "checked": ["reproduced the privesc chain", "read the authorization diff"],
+                "summary": "Fix is on the right track but test coverage is incomplete.",
+            }
+        else:
+            output = {
+                "verdict": "approve",
+                "confidence": "high",
+                "blocking_issues": [],
+                "checked": ["confirmed the patched version resolves the advisory",
+                            "ran the targeted suite"],
+                "summary": "Minimal, correct dependency upgrade; no regressions found.",
+            }
+        return {"status_enum": "exit", "structured_output": output,
+                "pull_request": None, "acu_used": 1.0}
 
 
 def get_client() -> DevinClient:

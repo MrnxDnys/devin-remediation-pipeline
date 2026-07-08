@@ -13,7 +13,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import db
-from .models import Job, JobStatus
+from .models import REVIEW_VERDICTS, Job, JobStatus
 
 router = APIRouter()
 
@@ -145,6 +145,7 @@ def serialize_job(job: Job) -> dict:
         "advisory": job.vulnerability_id,
         "status": job.status.value,
         "fix_strategy": job.fix_strategy,
+        "review_verdict": job.review_verdict,
         "pr_url": job.pr_url,
         "devin_session_url": job.devin_session_url,
         "summary": job.summary,
@@ -214,6 +215,9 @@ a:hover{text-decoration:underline}
 .b-failed,.b-escalated{background:rgba(240,86,63,.15);color:%(danger)s}
 .b-running{background:rgba(139,92,246,.15);color:%(accent)s}
 .b-queued{background:rgba(134,134,140,.15);color:%(muted)s}
+.b-approve{background:rgba(63,185,80,.15);color:%(success)s}
+.b-request_changes{background:rgba(224,145,47,.15);color:%(amber)s}
+.b-reject{background:rgba(240,86,63,.15);color:%(danger)s}
 .s-critical{color:%(danger)s;font-weight:600}
 .s-high{color:%(amber)s;font-weight:600}
 .s-medium,.s-low{color:%(muted)s}
@@ -254,6 +258,13 @@ def _strategy_cell(strategy: str | None) -> str:
     if not (strategy or "").strip():
         return '<span class="muted">-</span>'
     return _e(strategy)
+
+
+def _review_cell(verdict: str | None) -> str:
+    v = (verdict or "").strip().lower()
+    if v not in REVIEW_VERDICTS:
+        return '<span class="muted">-</span>'
+    return f'<span class="badge b-{_e(v)}">{_e(v.replace("_", " "))}</span>'
 
 
 def render_report() -> str:
@@ -300,14 +311,31 @@ def render_report() -> str:
             f"<td>{_e(j.finding_type)}</td>"
             f'<td class="muted">{_e(j.vulnerability_id)}</td>'
             f"<td>{_strategy_cell(j.fix_strategy)}</td>"
+            f"<td>{_review_cell(j.review_verdict)}</td>"
             f"<td>{_status_badge(j.status.value)}</td>"
             f"<td>{pr}</td>"
             f"<td>{session}</td>"
             "</tr>"
         )
     table_html = "".join(rows) or (
-        '<tr><td colspan="8" class="muted">No findings yet.</td></tr>'
+        '<tr><td colspan="9" class="muted">No findings yet.</td></tr>'
     )
+
+    # Review gate: independent Devin verdicts that block merge (request_changes / reject).
+    flagged = [j for j in jobs
+               if (j.review_verdict or "").strip().lower() in ("request_changes", "reject")]
+    if flagged:
+        gate_items = []
+        for j in flagged:
+            gate_items.append(
+                f'<div class="esc"><div class="t">#{_e(j.issue_number)} '
+                f'{_e(j.issue_title)} &middot; {_review_cell(j.review_verdict)}</div>'
+                f'<div class="blk">{_e(j.review_summary or "No detail recorded.")}</div></div>'
+            )
+        gate_html = "".join(gate_items)
+    else:
+        gate_html = ('<div class="muted">No blocking review verdicts - '
+                     'every reviewed PR was approved by the independent gate.</div>')
 
     if escalated:
         esc_items = []
@@ -340,9 +368,12 @@ def render_report() -> str:
 <h2>Per-finding trace</h2>
 <table>
 <thead><tr><th>Issue</th><th>Severity</th><th>Type</th><th>Advisory</th>
-<th>Strategy</th><th>Status</th><th>PR</th><th>Session</th></tr></thead>
+<th>Strategy</th><th>Review</th><th>Status</th><th>PR</th><th>Session</th></tr></thead>
 <tbody>{table_html}</tbody>
 </table>
+
+<h2>Review gate</h2>
+{gate_html}
 
 <h2>Escalations</h2>
 {esc_html}

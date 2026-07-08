@@ -37,6 +37,7 @@ def init_db() -> None:
                 devin_session_id TEXT, devin_session_url TEXT,
                 pr_url TEXT, summary TEXT,
                 fix_strategy TEXT, tests_run TEXT, residual_risk_or_blocker TEXT,
+                review_verdict TEXT, review_summary TEXT, review_session_url TEXT,
                 error TEXT, acu_used REAL,
                 created_at TEXT NOT NULL,
                 started_at TEXT, finished_at TEXT
@@ -57,7 +58,8 @@ def _migrate(c: sqlite3.Connection) -> None:
     """Additively add newer nullable columns to an existing `jobs` table.
     Keeps pre-existing SQLite dev DBs working without a rebuild."""
     have = {r["name"] for r in c.execute("PRAGMA table_info(jobs)").fetchall()}
-    for col in ("fix_strategy", "tests_run", "residual_risk_or_blocker"):
+    for col in ("fix_strategy", "tests_run", "residual_risk_or_blocker",
+                "review_verdict", "review_summary", "review_session_url"):
         if col not in have:
             c.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
 
@@ -120,13 +122,15 @@ def update_job(job: Job) -> None:
             """UPDATE jobs SET
                status=?, attempts=?, devin_session_id=?, devin_session_url=?,
                pr_url=?, summary=?, fix_strategy=?, tests_run=?,
-               residual_risk_or_blocker=?, error=?, acu_used=?,
+               residual_risk_or_blocker=?, review_verdict=?, review_summary=?,
+               review_session_url=?, error=?, acu_used=?,
                started_at=?, finished_at=?
                WHERE id=?""",
             (
                 job.status.value, job.attempts, job.devin_session_id,
                 job.devin_session_url, job.pr_url, job.summary,
                 job.fix_strategy, job.tests_run, job.residual_risk_or_blocker,
+                job.review_verdict, job.review_summary, job.review_session_url,
                 job.error, job.acu_used, job.started_at, job.finished_at, job.id,
             ),
         )
