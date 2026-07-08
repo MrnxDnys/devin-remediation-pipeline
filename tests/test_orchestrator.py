@@ -16,6 +16,10 @@ def fast_mock(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "session_timeout_seconds", 10)
     monkeypatch.setattr(settings, "max_retries", 1)
     monkeypatch.setattr(settings, "github_token", "")  # skip real GitHub writes
+    # Pin the review gate on, so tests are deterministic regardless of a local .env.local
+    # (individual tests override these when they need the gate off).
+    monkeypatch.setattr(settings, "enable_review_gate", True)
+    monkeypatch.setattr(settings, "auto_merge_on_approve", False)
     db.init_db()
     yield
     from app import orchestrator
